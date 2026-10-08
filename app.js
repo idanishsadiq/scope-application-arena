@@ -11,6 +11,17 @@
   const sb = hasBackend ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabasePublishableKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   }) : null;
+   if(sb){
+  sb.auth.onAuthStateChange((event, session) => {
+    if(event === 'PASSWORD_RECOVERY'){
+      state.user = session?.user || null;
+
+      if(location.hash !== '#/reset-password'){
+        location.hash = '#/reset-password';
+      }
+    }
+  });
+}
 
   const state = {
     user: null, profile: null, route: location.hash || '#/', game: null, rounds: [],
@@ -46,18 +57,118 @@
   }
 
   function staffLogin(){
-    shell(`<main class="auth"><img class="logo" src="assets/scope-logo.png" alt="SCOPE"><div class="panel auth-card"><div class="eyebrow">Secure staff access</div><h1>Host / Admin</h1><p class="muted">Sign in with your staff account. Player accounts never see the answer key.</p><div id="authMsg"></div><div class="field"><label>Email</label><input id="email" type="email" autocomplete="username" placeholder="host@example.com"></div><div class="field"><label>Password</label><input id="password" type="password" autocomplete="current-password" placeholder="••••••••"></div><button class="btn btn-primary btn-block" id="login">Sign in</button><p style="margin-top:16px;text-align:center"><button class="btn btn-ghost" id="back">Back to game</button></p></div></main>`);
-    $('#back').onclick=()=>location.hash='#/';
-    $('#login').onclick=async()=>{
-      if(!sb){ toast('Backend is not configured. Demo mode has no staff login.'); return; }
-      const email=$('#email').value.trim(), password=$('#password').value;
-      if(!email||!password){ $('#authMsg').innerHTML='<div class="notice error">Enter both email and password.</div>'; return; }
-      const {error}=await sb.auth.signInWithPassword({email,password});
-      if(error){ $('#authMsg').innerHTML=`<div class="notice error">${esc(error.message)}</div>`; return; }
-      await getSession(); if(!state.profile){ await sb.auth.signOut(); $('#authMsg').innerHTML='<div class="notice error">This account is not approved as staff.</div>'; return; }
-      location.hash=state.profile.role==='admin'?'#/admin':'#/host';
-    };
-  }
+  shell(`
+    <main class="container">
+      <section class="auth">
+        <img class="logo" src="assets/scope-logo.png" alt="SCOPE">
+        <div class="panel auth-card">
+          <h1>Staff Login</h1>
+
+          <input id="email" type="email" placeholder="Email">
+          <input id="password" type="password" placeholder="Password">
+
+          <button id="login" class="primary">
+            Sign in
+          </button>
+
+          <button id="forgotPassword" class="secondary">
+            Forgot password?
+          </button>
+
+          <button id="back" class="secondary">
+            Back to game
+          </button>
+
+          <div id="authMsg"></div>
+        </div>
+      </section>
+    </main>
+  `);
+
+  $('#back').onclick = () => {
+    location.hash = '#/';
+  };
+
+  $('#login').onclick = async () => {
+    if(!sb){
+      toast('Backend is not configured. Demo mode has no staff login.');
+      return;
+    }
+
+    const email = $('#email').value.trim();
+    const password = $('#password').value;
+
+    if(!email || !password){
+      $('#authMsg').innerHTML =
+        '<div class="notice error">Enter both email and password.</div>';
+      return;
+    }
+
+    const { error } = await sb.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if(error){
+      $('#authMsg').innerHTML =
+        `<div class="notice error">${esc(error.message)}</div>`;
+      return;
+    }
+
+    await getSession();
+
+    if(!state.profile){
+      await sb.auth.signOut();
+      $('#authMsg').innerHTML =
+        '<div class="notice error">This account is not authorized as staff.</div>';
+      return;
+    }
+
+    location.hash =
+      state.profile.role === 'admin'
+        ? '#/admin'
+        : '#/host';
+  };
+
+  $('#forgotPassword').onclick = async () => {
+    if(!sb){
+      toast('Backend is not configured.');
+      return;
+    }
+
+    const email = $('#email').value.trim();
+
+    if(!email){
+      $('#authMsg').innerHTML =
+        '<div class="notice error">Enter your staff email first.</div>';
+      return;
+    }
+
+    $('#forgotPassword').disabled = true;
+    $('#forgotPassword').textContent = 'Sending...';
+
+    const redirectTo =
+      window.location.origin + window.location.pathname;
+
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo
+    });
+
+    if(error){
+      $('#authMsg').innerHTML =
+        `<div class="notice error">${esc(error.message)}</div>`;
+      $('#forgotPassword').disabled = false;
+      $('#forgotPassword').textContent = 'Forgot password?';
+      return;
+    }
+
+    $('#authMsg').innerHTML =
+      '<div class="notice success">Password reset email sent. Check your email and open the newest link.</div>';
+
+    $('#forgotPassword').disabled = false;
+    $('#forgotPassword').textContent = 'Forgot password?';
+  };
+}
 
   async function adminDashboard(){
     if(!state.user) return staffLogin();
@@ -228,7 +339,7 @@
 
   function demoHost(id='demo-1',fresh=false,title='SCOPE Masterclass — Main Hall'){
     const rounds=CONTENT.defaultQuestions.map((q,i)=>({...q,id:`dr${i+1}`,round_number:i+1,status:i===0?'active':'waiting',revealed:false,category:i<4?'CV':'Motivation',tags:q.tags||[]}));
-    state.game={id,title,room_code:'SCP7',status:'live',current_round:1,total_rounds:rounds.length,round_seconds:20,max_players:50};state.rounds=rounds;state.currentRound=rounds[0];state.players=Array.from({length:Math.floor(Math.random()*20)+28},(_,i)=>({id:i,nickname:['Danish','Sara','Aiman','Ali','Fatima','Mira'][i%6]+(i>5?` ${Math.floor(i/6)+1}`:''),has_voted:false}));
+ state.game={id,title,room_code:'SCP7',status:'live',current_round:1,total_rounds:rounds.length,round_seconds:20,max_players:50};state.rounds=rounds;state.currentRound=rounds[0];state.players=Array.from({length:Math.floor(Math.random()*20)+28},(_,i)=>({id:i,nickname:['Danish','Sara','Aiman','Ali','Fatima','Mira'][i%6]+(i>5?` ${Math.floor(i/6)+1}`:''),has_voted:false}));
     shell(`<main class="container"><div class="dashboard-head"><div><div class="eyebrow">Demo host</div><h1>${esc(title)}</h1><p class="muted">Room SCP7 • ${state.players.length}/50 players</p></div><button class="btn btn-secondary" id="back">All games</button></div><div class="host-grid"><section class="panel host-stage" id="hostStage"></section><aside class="grid"><div class="panel"><div class="code">SCP7</div><div id="playerCount" class="stat" style="margin-top:14px"></div><div id="players" class="players-list" style="margin-top:14px"></div></div><div class="panel"><h3>Round control</h3><div class="grid"><button class="btn btn-primary" id="startRound">Start / resume</button><button class="btn btn-secondary" id="lockRound">Lock</button><button class="btn btn-secondary" id="revealRound">Reveal</button><button class="btn btn-secondary" id="nextRound">Next round</button><button class="btn btn-danger" id="finishGame">Finish</button></div></div></aside></div></main>`);
     $('#back').onclick=()=>location.hash='#/host';$('#startRound').onclick=()=>demoHostAction('start_round');$('#lockRound').onclick=()=>demoHostAction('lock_round');$('#revealRound').onclick=()=>demoHostAction('reveal_round');$('#nextRound').onclick=()=>demoHostAction('next_round');$('#finishGame').onclick=()=>demoHostAction('finish_game');refreshDemoUI();
   }
@@ -242,10 +353,91 @@
   }
   function downloadCSV(name,rows){if(!rows.length){toast('No results yet.');return;}const headers=Object.keys(rows[0]);const csv=[headers.join(','),...rows.map(r=>headers.map(h=>`"${String(r[h]??'').replace(/"/g,'""')}"`).join(','))].join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);}
 
-  async function boot(){
+  async function resetPasswordPage(){
+  if(!sb){
+    toast('Backend is not configured.');
+    return;
+  }
+
+  shell(`
+    <main class="container">
+      <section class="auth">
+        <img class="logo" src="assets/scope-logo.png" alt="SCOPE">
+        <div class="panel auth-card">
+          <h1>Reset your password</h1>
+          <p class="muted">Enter a new password for your staff account.</p>
+
+          <input id="newPassword" type="password" placeholder="New password">
+          <input id="confirmPassword" type="password" placeholder="Confirm new password">
+
+          <div id="resetMsg"></div>
+
+          <button id="resetPasswordBtn" class="primary">
+            Update password
+          </button>
+
+          <button id="backToStaff" class="secondary">
+            Back to staff login
+          </button>
+        </div>
+      </section>
+    </main>
+  `);
+
+  $('#resetPasswordBtn').onclick = async () => {
+    const password = $('#newPassword').value;
+    const confirm = $('#confirmPassword').value;
+
+    if(!password || !confirm){
+      $('#resetMsg').innerHTML =
+        '<div class="notice error">Please enter both passwords.</div>';
+      return;
+    }
+
+    if(password.length < 8){
+      $('#resetMsg').innerHTML =
+        '<div class="notice error">Password must be at least 8 characters.</div>';
+      return;
+    }
+
+    if(password !== confirm){
+      $('#resetMsg').innerHTML =
+        '<div class="notice error">Passwords do not match.</div>';
+      return;
+    }
+
+    $('#resetPasswordBtn').disabled = true;
+    $('#resetPasswordBtn').textContent = 'Updating...';
+
+    const { error } = await sb.auth.updateUser({
+      password: password
+    });
+
+    if(error){
+      $('#resetMsg').innerHTML =
+        `<div class="notice error">${esc(error.message)}</div>`;
+      $('#resetPasswordBtn').disabled = false;
+      $('#resetPasswordBtn').textContent = 'Update password';
+      return;
+    }
+
+    $('#resetMsg').innerHTML =
+      '<div class="notice success">Password updated successfully. Redirecting to staff login...</div>';
+
+    await sb.auth.signOut();
+
+    setTimeout(() => {
+      location.hash = '#/staff';
+    }, 1500);
+  };
+
+  $('#backToStaff').onclick = () => {
+    location.hash = '#/staff';
+  };
+}async function boot(){
     window.addEventListener('hashchange',boot); if(sb) await getSession();
     const parts=(location.hash||'#/' ).replace(/^#\/?/,'').split('/'); const route=parts[0]||'';
-    if(route==='staff')return staffLogin(); if(route==='admin')return adminDashboard(); if(route==='host')return parts[1]?hostGame(parts[1]):hostDashboard(); if(route==='play')return playerPage(parts[1]); return landing();
+    if(route==='staff')return staffLogin();if(route==='reset-password')return resetPasswordPage(); if(route==='admin')return adminDashboard(); if(route==='host')return parts[1]?hostGame(parts[1]):hostDashboard(); if(route==='play')return playerPage(parts[1]); return landing();
   }
   boot();
 })();
